@@ -6,7 +6,8 @@ iptables configuration that gets updated dynamically by a cronjob.
 Useful if you've got an IP that changes often but you don't want to  
 leave some ports on your server unprotected.  
   
-Use an iptables rule like this in your firewall (this would be for ssh/22, change to your liking):  
+Save the script to `/usr/local/bin/update-ipset-dyndns.sh`; then add an  
+iptables rule like this in your firewall (this would be for ssh/22, change to your liking):  
   
 ```sh
 # match set "set-dynip" and allow traffic from those hosts to ssh
