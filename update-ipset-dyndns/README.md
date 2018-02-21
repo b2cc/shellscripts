@@ -16,5 +16,5 @@ iptables -A INPUT -p tcp -m set --match-set set-dynip src -m tcp --dport 22 -m m
 iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 
 # drop everything else
-iptables -A INPUT -j REJECT --reject-with icmp-host-prohibited
+iptables -A INPUT -p tcp --dport 22 -j REJECT --reject-with icmp-host-prohibited
 ```
