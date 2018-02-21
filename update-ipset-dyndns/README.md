@@ -4,7 +4,7 @@ a small shell script that reads hostnames from a file, resolves them to IP
 addresses and adds them to an ipset. This allows for a static firewall /  
 iptables configuration that gets updated dynamically by a cronjob.  
 Useful if you've got an IP that changes often but you don't want to  
-leave <someport> on your server unprotected.  
+leave some ports on your server unprotected.  
   
 Use an iptables rule like this in your firewall (this would be for ssh/22, change to your liking):  
   
