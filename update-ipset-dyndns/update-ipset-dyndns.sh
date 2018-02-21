@@ -35,8 +35,8 @@ done
 clientlist="/etc/update-ipset-dyndns.list"
 clientips=()
 ip=""
-ipset_online="dynip"
-ipset_swap="dynip-swap"
+ipset_online="set-dynip"
+ipset_swap="set-dynip-swap"
 
 log "performing pre-flight checks..."
 if ! [[ -f ${clientlist} ]]; then
