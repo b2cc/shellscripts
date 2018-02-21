@@ -1,0 +1,5 @@
+# one host entry per line
+# lines starting with hashes or non printable characters are ignored
+
+# comment
+your.server.here
