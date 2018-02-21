@@ -19,3 +19,7 @@ iptables -A INPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
 # drop everything else
 iptables -A INPUT -p tcp -m tcp --dport 22 -j REJECT --reject-with icmp-host-prohibited
 ```
+  
+To install the cronjob file just copy the contents of `update-ipset-dyndns.crond`  
+to `/etc/cron.d/update-ipset-dyndns`.  
+All done!
