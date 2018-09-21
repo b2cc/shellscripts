@@ -72,7 +72,8 @@ fi
 }
 
 dl_extension() {
-curl -f -s -m 3 "${GIT_SHELL_EXTENSIONS_URL}/${extension}" -o ~/${extension} || echo "missing file ${extension} and could not grab it from intx git server. check network/firewall. prompt may not work as expected."
+curl -f -s -m 5 "${GIT_SHELL_EXTENSIONS_URL}/${extension}" -o ~/${extension} || \
+echo "missing file ${extension} and could not grab it from github.com. check network/firewall. prompt may not work as expected."
 }
 
 enable_extensions() {
