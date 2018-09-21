@@ -58,8 +58,8 @@ stty -ixon
 # set to >=1 to disable
 git_prompt_disabled="0"
 precondition_failed="0"
-preflight(){
-if [[ ${git_prompt_disabled} -ne "0" ]]; then
+preflight() {
+if [[ ${git_prompt_disabled} -eq "0" ]]; then
   BINARIES=(git sha256sum curl)
   for binary in "${BINARIES[@]}"; do
     if ! [[ -x $(which ${binary} 2>/dev/null) ]]; then
@@ -75,7 +75,7 @@ dl_extensions() {
 curl -f -s -m 3 "${GIT_SHELL_EXTENSIONS_URL}/${extension}" -o ~/${extension} || echo "missing file ${extension} and could not grab it from intx git server. check network/firewall. prompt may not work as expected."
 }
 
-enable_extensions(){
+enable_extensions() {
 GIT_VERSION="$(git --version | awk '{print $3}')"
 GIT_SHELL_EXTENSIONS="git-prompt.sh git-completion.bash"
 GIT_SHELL_EXTENSIONS_URL="https://raw.githubusercontent.com/git/git/v${GIT_VERSION}/contrib/completion"
