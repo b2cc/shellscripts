@@ -60,8 +60,10 @@ curl_missing="0"
 git_prompt_enabled="0"
 if ! [[ -x $(which curl 2>/dev/null) ]]; then curl_missing="1"; fi
 
+GIT_VERSION=`git --version | awk '{ print $3 }'`
+
 GIT_SHELL_EXTENSIONS="git-prompt.sh git-completion.bash"
-GIT_SHELL_EXTENSIONS_URL="https://raw.githubusercontent.com/git/git/master/contrib/completion"
+GIT_SHELL_EXTENSIONS_URL="https://raw.githubusercontent.com/git/git/v${GIT_VERSION}/contrib/completion"
 
 for extension in ${GIT_SHELL_EXTENSIONS[@]}; do
   if ! [[ -f ~/${extension} ]]; then
