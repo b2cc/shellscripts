@@ -71,7 +71,7 @@ if [[ ${git_prompt_disabled} -eq "0" ]]; then
 fi
 }
 
-dl_extensions() {
+dl_extension() {
 curl -f -s -m 3 "${GIT_SHELL_EXTENSIONS_URL}/${extension}" -o ~/${extension} || echo "missing file ${extension} and could not grab it from intx git server. check network/firewall. prompt may not work as expected."
 }
 
@@ -81,15 +81,17 @@ GIT_SHELL_EXTENSIONS="git-prompt.sh git-completion.bash"
 GIT_SHELL_EXTENSIONS_URL="https://raw.githubusercontent.com/git/git/v${GIT_VERSION}/contrib/completion"
 for extension in ${GIT_SHELL_EXTENSIONS[@]}; do
   if ! [[ -f ~/${extension} ]]; then
-    dl_extensions
+    dl_extension
   fi
   if [[ -r ~/${extension} ]]; then
     local_extension_sha="$(sha256sum ~/${extension} | awk '{print $1}')"
     remote_extension_sha="$(curl -s -L -f ${GIT_SHELL_EXTENSIONS_URL}/${extension} | sha256sum - | awk '{print $1}')"
     if [[ ${local_extension_sha} == ${remote_extension_sha} ]]; then
-      source ~/${extension} && git_prompt_enabled="1"
+      source ~/${extension}
     else
-      rm -f ~/${extension} >/dev/null && dl_extensions
+      rm -f ~/${extension} >/dev/null && \
+      dl_extension && \
+      source ~/${extension}
     fi
   fi
 done
