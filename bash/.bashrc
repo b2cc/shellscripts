@@ -55,32 +55,58 @@ shopt -s cmdhist
 stty -ixon
 
 # git support
-# check for git completion files and download if needed
-curl_missing="0"
-git_prompt_enabled="0"
-if ! [[ -x $(which curl 2>/dev/null) ]]; then curl_missing="1"; fi
+# set to >=1 to disable
+git_prompt_disabled="0"
+precondition_failed="0"
+preflight() {
+if [[ ${git_prompt_disabled} -eq "0" ]]; then
+  BINARIES=(git sha256sum curl)
+  for binary in "${BINARIES[@]}"; do
+    if ! [[ -x $(which ${binary} 2>/dev/null) ]]; then
+      echo "${binary} binary not found."
+      precondition_failed="1"
+      break
+    fi
+  done
+fi
+}
 
+dl_extension() {
+curl -f -s -m 5 "${GIT_SHELL_EXTENSIONS_URL}/${extension}" -o ~/${extension} || \
+echo "missing file ${extension} and could not grab it from github.com. check network/firewall. prompt may not work as expected."
+}
+
+enable_extensions() {
+GIT_VERSION="$(git --version | awk '{print $3}')"
 GIT_SHELL_EXTENSIONS="git-prompt.sh git-completion.bash"
-GIT_SHELL_EXTENSIONS_URL="https://raw.githubusercontent.com/git/git/master/contrib/completion"
-
+GIT_SHELL_EXTENSIONS_URL="https://raw.githubusercontent.com/git/git/v${GIT_VERSION}/contrib/completion"
 for extension in ${GIT_SHELL_EXTENSIONS[@]}; do
   if ! [[ -f ~/${extension} ]]; then
-    if [[ ${curl_missing} -eq "1" ]]; then
-      echo "curl binary missing, can't auto-install shell extension ${extension} for git."
+    dl_extension
+  fi
+  if [[ -r ~/${extension} ]]; then
+    local_extension_sha="$(sha256sum ~/${extension} | awk '{print $1}')"
+    remote_extension_sha="$(curl -s -L -f ${GIT_SHELL_EXTENSIONS_URL}/${extension} | sha256sum - | awk '{print $1}')"
+    if [[ ${local_extension_sha} == ${remote_extension_sha} ]]; then
+      source ~/${extension}
     else
-      curl -f -s -m 3 "${GIT_SHELL_EXTENSIONS_URL}/${extension}" -o ~/${extension} || echo "missing file ${extension} and could not grab it from intx git server. check network/firewall. prompt may not work as expected."
+      rm -f ~/${extension} >/dev/null && \
+      dl_extension && \
+      source ~/${extension}
     fi
   fi
-  if [[ -f ~/${extension} ]]; then source ~/${extension} && git_prompt_enabled="1"; fi
 done
+}
 
-if [[ ${git_prompt_enabled} -eq "1" ]]; then
+preflight
+if [[ ${git_prompt_disabled} -eq "0" ]] && [[ ${precondition_failed} -eq "0" ]]; then
   GIT_PS1_SHOWDIRTYSTATE=1
   GIT_PS1_SHOWSTASHSTATE=1
   GIT_PS1_SHOWUNTRACKEDFILES=1
   GIT_PS1_SHOWCOLORHINTS=1
   GIT_PS1_SHOWUPSTREAM="auto"
   GIT_PS1_DESCRIBE_STYLE="branch"
+  enable_extensions
   PROMPT_COMMAND='history -a; history -c; history -r; __git_ps1 "\[$green$bold\]\u\[$reset\]@\[$green$bold\]\h\[$reset\]:\w" " \\\$ "'
 else
   PROMPT_COMMAND='history -a; history -c; history -r; PS1="\[$green$bold\]\u\[$reset\]@\[$green$bold\]\h\[$reset\]:\w # "'
