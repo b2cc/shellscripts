@@ -34,18 +34,23 @@ NO_PROMPT=false
 
 # parse and validate input for lvm increase, we only work with MB as unit so only a number is required
 verify_size ()
-{
-  if [[ "$1" =~ ^[0-9]+$ ]]; 
-   then  
-     if [ -z "$LVM_SIZE" ]
-     then
-       LVM_SIZE=$1;
-     else
-       echo "  LVM increase already defined (${LVM_SIZE}m)."
-     fi
-   else 
-     echo "  please only enter digits, value will be considered as MB" ; 
-   fi 
+{  
+  if [ -z "$LVM_SIZE" ]
+  then
+    if [[ "$1" =~ ^[0-9]+$ ]] 
+    then  
+      LVM_SIZE=$1;
+    elif [[ "$1" =~ ^(0)?[0-9]?[0-9]%$ || "$1" == "100%" ]]
+    then
+      LVM_SIZE=$1;
+    else 
+      echo "  please only enter valid %-FREE value or digits(value will be considered as MB)" ; 
+    fi 
+  else
+    echo "  LVM increase already defined (${LVM_SIZE}m)."
+  fi
+
+  ## add a functionality to also allow %free
 }
 
 # parse and validate input for lvm name, make sure the lvm exists, also make sure only one lvm is handled 
@@ -72,7 +77,8 @@ check_input ()
       ;;
     "help"|"-h")  
       echo -e "  this script can be used to resize a lvm and extend the coresponding vg with existing free diskspace or a new device"
-      echo -e "    usage: $0 [lvm-name] [size in MB] (eg.: $0 lv_home 2048 )\n"
+      echo -e "    usage: $0 [lvm-name] [size in MB] (eg.: $0 lv_home 2048 )"
+      echo -e "    usage: $0 [lvm-name] [XXX% of free space] (eg.: $0 lv_home 100% )\n"
       echo -e "  the noprompt parameter is optional and will supress all confirmation dialogs and assumes certian parameters."
       echo -e "  only use this parameter if you already have experience with this script (eg.: $0 lv_home 2048 noprompt )\n"
       exit 0
@@ -95,15 +101,25 @@ resize_lvm ()
     # user confirmation can be skipped if script was started with noprompt parameter
     if [ "$NO_PROMPT" == "false" ]
     then
-      read -p "  Increase $LVM_NAME by ${LVM_SIZE}m? (yes/NO) " PROMPT_YN
+      read -p "  Increase $LVM_NAME by ${LVM_SIZE}? (yes/NO) " PROMPT_YN
     else
       PROMPT_YN="yes"
     fi
     # if prompted yes, resize the lvm and the filesystem
     case $PROMPT_YN in
-      "yes"|"YES"|"y"|"Y")  
-        lvresize -r -L+${LVM_SIZE}M $(lvs -o lv_path | grep $LVM_NAME) > /dev/null 2>&1
-        echo "  LVM ${LVM_NAME} increased by ${LVM_SIZE}m, new value: $(lvs -o lv_name,lv_size | grep  $LVM_NAME | awk '{ print $2 }')"
+      "yes"|"YES"|"y"|"Y")
+        if  [[ "$LVM_SIZE" =~ ^(0)?[0-9]?[0-9]%$ || "$LVM_SIZE" == "100%" ]]
+        then
+          lvresize -r -l +${LVM_SIZE}FREE $(lvs -o lv_path | grep $LVM_NAME) > /dev/null 2>&1
+        else
+          lvresize -r -L+${LVM_SIZE}M $(lvs -o lv_path | grep $LVM_NAME) > /dev/null 2>&1
+        fi
+        if [ $? -ne 0 ]; then
+          echo "  could not resize lvm"
+          exit 1
+        fi
+        ## handle error return code
+        echo "  LVM ${LVM_NAME}, new value: $(lvs -o lv_name,lv_size | grep  $LVM_NAME | awk '{ print $2 }')"
         exit 0
         ;;
       "no"|"NO"|"n"|"N"|"")
@@ -128,50 +144,6 @@ function rescan_scsi ()
   done
 }
 
-verify_free_space ()
-{
-  # this block determins if there is enought free space on any connected disk
-  # it iterates though all /dev/sd[a-z] devices
-  #   ToDo: don't forget to verify that only valid disks are used
-  for i in `ls /dev/sd[a-z]`; 
-  do
-    # check if there are already partitions on the disk, reason for this is, that parted output differs between partitioned and unpartitioned disks 
-    PARTCOUNT=$(parted $i unit MB print free  2> /dev/null  | grep primary)  
-    if [ -n "$PARTCOUNT" ]
-    then
-      FREE=$(parted $i unit MB print free 2> /dev/null  | grep 'Free Space' | tail -n1 | awk '{print $3}' | sed -e 's/[a-Z]//g' | awk 'BEGIN {FS="."}{print $1}' )
-      FREE=$( expr ${FREE} - 1)
-      # don't configure 2 or more volume groups on the same disk, if you need more than one volume group on a disk, you have to disable the check and also adapt the pv/vg resize part
-      if [ -n "$(pvs | grep ${i} | grep ${VG_NAME})" ] 
-        then
-        # only resize the partition if either the partition or the partition and the remaining vg space is big enough to handle the lvm increase
-        if (( $LVM_SIZE <= $( expr ${FREE} + ${VGS_SIZE} ) )) 
-        then 
-            echo "  ${FREE}m free space on $i"
-            DEVICE=$i
-            FREE_TYPE="resizeable"
-        else
-          FREESPACELIST="${FREESPACELIST}  $i free: $FREE MB\n"
-        fi
-      fi
-    else
-      # normalize free space value so that it can be parsed by the script
-      UNPART=$(parted $i unit MB print free 2> /dev/null | grep sd[a-z] | awk '{ print $3 }' | sed -e 's/[a-Z]//g'  | awk 'BEGIN {FS="."}{print $1}' )
-      if [ -n "$UNPART" ] 
-      then
-        # if the new disk has enough space, a new partiton and phisical volume will be created 
-        if (( $LVM_SIZE <= $UNPART )) 
-        then 
-          echo "  $i is unpartitioned and has ${UNPART}m free space."
-          FREE_TYPE="unpartitioned"
-          EXAMPLE=$i
-        else
-          FREESPACELIST="$FREESPACELIST  $i free: $UNPART MB\n"
-        fi
-      fi
-    fi    
-  done
-}
 
 # this block will ask the user which devices should be used for the new partition, if noprompt parameter was set, the device will be assumed based on earlier evaluation steps
 function define_device ()
@@ -265,7 +237,7 @@ resize_partition ()
         fi
         partprobe
         pvresize ${DEVICE}${LVM_PARTITION_NUMBER}
-        resize_lvm $LVM_NAME $LVM_SIZE
+        break
         ;;
       "no"|"NO"|"n"|"N"|"")
         echo " abort"
@@ -276,7 +248,69 @@ resize_partition ()
         ;;
     esac
   done    
- 
+}
+
+
+verify_free_space_and_extend ()
+{
+  # this block determins if there is enought free space on any connected disk
+  # it iterates though all /dev/sd[a-z] devices
+  #   ToDo: don't forget to verify that only valid disks are used
+  for i in `ls /dev/sd[a-z]`; 
+  do
+    # check if there are already partitions on the disk, reason for this is, that parted output differs between partitioned and unpartitioned disks 
+    PARTCOUNT=$(parted $i unit MB print free  2> /dev/null  | grep primary)  
+    if [ -n "$PARTCOUNT" ]
+    then
+      FREE=$(parted $i unit MB print free 2> /dev/null  | grep 'Free Space' | tail -n1 | awk '{print $3}' | sed -e 's/[a-Z]//g' | awk 'BEGIN {FS="."}{print $1}' )
+      FREE=$( expr ${FREE} - 1)
+      # don't configure 2 or more volume groups on the same disk, if you need more than one volume group on a disk, you have to disable the check and also adapt the pv/vg resize part
+      if [ -n "$(pvs | grep ${i} | grep ${VG_NAME})" ] 
+        then
+        # only resize the partition if either the partition or the partition and the remaining vg space is big enough to handle the lvm increase
+        if (( $LVM_SIZE <= $( expr ${FREE} + ${VGS_SIZE} ) )) 
+        then 
+            echo "  ${FREE}m free space on $i"
+            DEVICE=$i
+            FREE_TYPE="resizeable"
+        else
+          FREESPACELIST="${FREESPACELIST}  $i free: $FREE MB\n"
+        fi
+      fi
+    else
+      # normalize free space value so that it can be parsed by the script
+      UNPART=$(parted $i unit MB print free 2> /dev/null | grep sd[a-z] | awk '{ print $3 }' | sed -e 's/[a-Z]//g'  | awk 'BEGIN {FS="."}{print $1}' )
+      if [ -n "$UNPART" ] 
+      then
+        # if the new disk has enough space, a new partiton and phisical volume will be created 
+        if (( $LVM_SIZE <= $UNPART )) 
+        then 
+          echo "  $i is unpartitioned and has ${UNPART}m free space."
+          FREE_TYPE="unpartitioned"
+          EXAMPLE=$i
+        else
+          FREESPACELIST="$FREESPACELIST  $i free: $UNPART MB\n"
+        fi
+      fi
+    fi    
+  done
+  # script only continues if there is enough free space, otherwise it aborts
+  case $FREE_TYPE in 
+    "resizeable")
+        resize_partition
+        resize_lvm $LVM_NAME $LVM_SIZE
+      ;;
+    "unpartitioned")
+        define_device 
+        create_partition      
+      ;;
+    *)
+      echo "  Not enough space left on any disk, please add a new disk, or extend existing one."
+      echo -e "\n`pvs`\n"
+      echo -e "  $FREESPACELIST"
+      exit 1
+      ;;
+  esac
 }
 
 ### end function block 
@@ -321,7 +355,18 @@ VG_NAME=$(lvs  | grep $LVM_NAME | awk '{ print $2 }')
 VGS_SIZE=$(vgs --unit m | grep ${VG_NAME} | awk '{ print $7}' | awk 'BEGIN {FS="."}{print $1}' | sed -e 's/[a-Z]//g')
 
 # decide if volume group space is enough or if partition or vg needs to be extended 
-if (( $LVM_SIZE  <= $VGS_SIZE  ))
+# if %FREE is chosen, the script will always try to extend the partition and the pv
+if  [[ "$LVM_SIZE" =~ ^(0)?[0-9]?[0-9]%$ || "$LVM_SIZE" == "100%" ]]
+then
+  echo "  extend $LVM_NAME by $LVM_SIZE free space of device"
+  rescan_scsi
+  for i in `pvs | grep ${VG_NAME} | awk '{ print $1 }' | sed -e 's/[0-9]//g' | sort | uniq`
+  do
+    DEVICE=$i
+    resize_partition
+  done
+  resize_lvm $LVM_NAME $LVM_SIZE  
+elif (( $LVM_SIZE  <= $VGS_SIZE  ))
 then 
   # resize lvm if there is enough free space in the vg, a partition or vg extension is discouraged at this point
   echo "  Free space in VG: ${VGS_SIZE} MB"
@@ -329,25 +374,8 @@ then
 else
   echo "  Volume group $VG_NAME to small for automatic increase, please create new partition."
   rescan_scsi
-  verify_free_space
+  verify_free_space_and_extend
 fi
-
-# script only continues if there is enough free space, otherwise it aborts
-case $FREE_TYPE in 
-  "resizeable")
-    resize_partition
-    ;;
-  "unpartitioned")
-      define_device 
-      create_partition      
-    ;;
-  *)
-    echo "  Not enough space left on any disk, please add a new disk, or extend existing one."
-    echo -e "\n`pvs`\n"
-    echo -e "  $FREESPACELIST"
-    exit 1
-    ;;
-esac
 
 ### end script main body
 ###########################
