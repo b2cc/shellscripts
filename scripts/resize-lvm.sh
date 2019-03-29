@@ -262,7 +262,7 @@ verify_free_space_and_extend ()
     PARTCOUNT=$(parted $i unit MB print free  2> /dev/null  | grep primary)  
     if [ -n "$PARTCOUNT" ]
     then
-      FREE=$(parted $i unit MB print free 2> /dev/null  | grep 'Free Space' | tail -n1 | awk '{print $3}' | sed -e 's/[a-Z]//g' | awk 'BEGIN {FS="."}{print $1}' )
+      FREE=$(parted $i unit MB print free 2> /dev/null  | grep 'Free Space' | tail -n1 | awk '{print $3}' | sed -e 's/[a-Z]//g' | awk 'BEGIN {FS="."}{print $1}' | awk 'BEGIN {FS=","}{print $1}' )
       FREE=$( expr ${FREE} - 1)
       # don't configure 2 or more volume groups on the same disk, if you need more than one volume group on a disk, you have to disable the check and also adapt the pv/vg resize part
       if [ -n "$(pvs | grep ${i} | grep ${VG_NAME})" ] 
@@ -352,7 +352,7 @@ done
 
 # get volume group name and size based on the lvm 
 VG_NAME=$(lvs  | grep $LVM_NAME | awk '{ print $2 }')
-VGS_SIZE=$(vgs --unit m | grep ${VG_NAME} | awk '{ print $7}' | awk 'BEGIN {FS="."}{print $1}' | sed -e 's/[a-Z]//g')
+VGS_SIZE=$(vgs --unit m | grep ${VG_NAME} | awk '{ print $7}' | awk 'BEGIN {FS="."}{print $1}' | sed -e 's/[a-Z]//g' | awk 'BEGIN {FS=","}{print $1}')
 
 # decide if volume group space is enough or if partition or vg needs to be extended 
 # if %FREE is chosen, the script will always try to extend the partition and the pv
@@ -372,7 +372,7 @@ then
   echo "  Free space in VG: ${VGS_SIZE} MB"
   resize_lvm $LVM_NAME $LVM_SIZE
 else
-  echo "  Volume group $VG_NAME to small for automatic increase, please create new partition."
+  echo "  Volume group $VG_NAME to small for automatic increase, please create new partition or resize existing one."
   rescan_scsi
   verify_free_space_and_extend
 fi
