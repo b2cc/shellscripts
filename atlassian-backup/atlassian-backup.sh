@@ -15,16 +15,8 @@
 # You should have received a copy of the GNU General Public License
 # along with this program.  If not, see <https://www.gnu.org/licenses/>.
 #
-# Author: b2c@dest-unreachable.net
+# Author: david.gabriel@ndgit.com
 # (c) 2020
-#
-# parts of this script have been inspired by atlassian's own scripts:
-# https://bitbucket.org/atlassianlabs/automatic-cloud-backup
-# however most of it has been heavily reworked to add logging and
-# error detecation.
-# the bitbucket backup implementation has been implemented from scratch
-# and needs oauth key+secret to be configured on the bitbucket cloud
-# tenant to work.
 
 # script common variables
 bitbucket_oauth_url="https://bitbucket.org/site/oauth2"
@@ -129,6 +121,11 @@ check_vars() {
       if [[ -z ${timezone} ]]; then timezone="Europe/Vienna"; fi
     ;;
   esac
+}
+
+check_backup_folder() {
+  [[ -d ${BACKUP_FOLDER} ]] || die " * Backup folder ${BACKUP_FOLDER} doesn't exist, exiting."
+  [[ -w ${BACKUP_FOLDER} ]] || die " * Backup folder ${BACKUP_FOLDER} isn't writable, exiting."
 }
 
 print_backup_info() {
@@ -439,6 +436,7 @@ trap "die '!! backup interrupted !! lock file created: **${backup_error_file}**,
 
 check_vars
 check_for_binaries
+check_backup_folder
 check_backup_error_lockfile
 check_backup_in_progress_lockfile
 create_lockfile
