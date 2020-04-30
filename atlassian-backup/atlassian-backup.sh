@@ -106,6 +106,7 @@ check_vars() {
   if [[ -z ${APP} ]]; then die " * Error: variable \$APP is not defined, exiting"; fi
   if [[ -z ${BACKUP_FOLDER} ]]; then die " * Error: variable \$BACKUP_FOLDER is not defined, exiting"; fi
   if [[ -z ${tenant} ]]; then die " * Error: variable \$tenant is not defined, exiting"; fi
+  if [[ -z ${retention} ]]; then retention=32; fi
 
   case ${backup} in
     bitbucket)
@@ -117,7 +118,6 @@ check_vars() {
       if [[ -z ${EMAIL} ]]; then die " * Error: variable \$EMAIL is not defined, exiting"; fi
       if [[ -z ${progress_retries} ]]; then progress_retries=300; fi
       if [[ -z ${progress_sleep} ]]; then progress_sleep=30; fi
-      if [[ -z ${retention} ]]; then retention=32; fi
       if [[ -z ${timezone} ]]; then timezone="Europe/Vienna"; fi
     ;;
   esac
@@ -142,10 +142,10 @@ log "    * Backup retention: ${retention} days"
 
 remove_old_backups() {
 log " * Removing backups older than ${retention} days."
-if ! find ${BACKUP_FOLDER} -mindepth 1 -maxdepth 2 -type f -mtime +${retention} | xargs rm -f; then
-  die " * error removing old backups files!"
+if ! find ${BACKUP_FOLDER} -type f -mtime +${retention} | xargs rm -f; then
+  die "    * Error removing old backups files!"
 else
-  log "* cleanup complete."
+  log "    * Cleanup complete."
 fi
 }
 
@@ -153,11 +153,11 @@ backup_bitbucket() {
 log " * Starting ${APP} backup"
 set -o pipefail
 log " * Acquiring ${APP} oauth token.."
-auth_token=$(curl -sSlf -X POST -u ${oauth_key}:${oauth_secret} ${bitbucket_oauth_url}/access_token -d  grant_type=client_credentials | jq -r '.access_token' || die " * Error while obtaining ${APP} OAuth token, exiting.")
+auth_token=$(curl -sSlf -X POST -u ${oauth_key}:${oauth_secret} ${bitbucket_oauth_url}/access_token -d  grant_type=client_credentials | jq -r '.access_token') ||  die " * Error while obtaining ${APP} OAuth token, exiting."
 
 log " * Generating list of repositories..."
 for ((i = 1 ; i <= 1000 ; i++)); do
-  contents=$(curl -sSlf -H "Authorization: Bearer ${auth_token}" "${bitbucket_api_url}/repositories/${tenant}?page=${i}" || die " * Error getting list of repositories from ${APP}, exiting.")
+  contents=$(curl -sSlf -H "Authorization: Bearer ${auth_token}" "${bitbucket_api_url}/repositories/${tenant}?page=${i}") || die " * Error getting list of repositories from ${APP}, exiting."
   echo "$contents" > ${TEMPDIR}/bburl_${i}.json
   if jq -e '.next | length == 0' >/dev/null; then 
     break
@@ -182,7 +182,7 @@ log " * moving backup file to permanent storage location..."
 mv BITBUCKET-backup-${TODAY}.tar.gz ${BACKUP_FOLDER}/ || die " * Error while moving BITBUCKET-backup-${TODAY}.tar.gz to ${BACKUP_FOLDER}/, exiting."
 log " * Cleaning up..."
 cleanup
-log " * ${APP} backup finished successfully after ${SECONDS} seconds, exiting."
+log " * ${APP} backup finished successfully after ${SECONDS} seconds."
 }
 
 backup_confluence() {
@@ -235,7 +235,7 @@ else
   log " * Now downloading backup file: https://${INSTANCE}/wiki/download/${FILE_NAME} to ${BACKUP_FOLDER}/CONFLUENCE-backup-${TODAY}.zip ..."
   curl -sSfL -u ${EMAIL}:${API_TOKEN} "https://${INSTANCE}/wiki/download/${FILE_NAME}" -o "${BACKUP_FOLDER}/CONFLUENCE-backup-${TODAY}.zip" || die " * Error while downloading ${APP} backup from atlassian cloud, exiting."
 fi
-log " * ${APP} backup finished successfully after ${SECONDS} seconds, exiting."
+log " * ${APP} backup finished successfully after ${SECONDS} seconds."
 }
 
 backup_jira(){
@@ -294,7 +294,7 @@ else
   log " * Now downloading backup file: https://${INSTANCE}/plugins/servlet/${FILE_NAME} to ${BACKUP_FOLDER}/JIRA-backup-${TODAY}.zip ..."
   curl -sSLf -u ${EMAIL}:${API_TOKEN} -X GET "https://${INSTANCE}/plugins/servlet/${FILE_NAME}" -o "${BACKUP_FOLDER}/JIRA-backup-${TODAY}.zip" || " * Error while downloading ${APP} backup from atlassian cloud, exiting."
 fi
-log " * ${APP} backup finished successfully after ${SECONDS} seconds, exiting."
+log " * ${APP} backup finished successfully after ${SECONDS} seconds."
 }
 
 print_help() {
