@@ -264,6 +264,7 @@ TASK_ID=$(echo "$BKPMSG" | sed -n 's/.*"taskId"[ ]*:[ ]*"\([^"]*\).*/\1/p')
  
 # Checks if the backup process completed for the number of times specified in progress_retries variable
 for (( c=1; c<=${progress_retries}; c++ )); do
+  log "    * waiting for atlassian cloud to finish backup..."
   PROGRESS_JSON=$(curl -sSLf -u ${EMAIL}:${API_TOKEN} -X GET https://${INSTANCE}/rest/backup/1/export/getProgress?taskId=${TASK_ID} || die " * Error while requesting backup generation progress, exiting.")
   FILE_NAME=$(echo "${PROGRESS_JSON}" | sed -n 's/.*"result"[ ]*:[ ]*"\([^"]*\).*/\1/p')
  
