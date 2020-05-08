@@ -248,7 +248,7 @@ log " * Requesting start of ${APP} backup from atlassian cloud..."
 log "    * backup with attachments requested: ${attachments}"
  
 ## The $BKPMSG variable is used to save and print the response
-BKPMSG=$(curl -sSLf -u ${EMAIL}:${API_TOKEN} -H "Accept: application/json" -H "Content-Type: application/json" --data-binary "{\"cbAttachments\":\"${ATTACHMENTS}\", \"exportToCloud\":\"${EXPORT_TO_CLOUD}\"}" -X POST https://${INSTANCE}/rest/backup/1/export/runbackup || die " * Error during request to atlassian cloud to start ${APP} backup, exiting.")
+BKPMSG=$(curl -sSLf -u ${EMAIL}:${API_TOKEN} -H "Accept: application/json" -H "Content-Type: application/json" --data-binary "{\"cbAttachments\":\"${attachments}\", \"exportToCloud\":\"${EXPORT_TO_CLOUD}\"}" -X POST https://${INSTANCE}/rest/backup/1/export/runbackup || die " * Error during request to atlassian cloud to start ${APP} backup, exiting.")
  
 ## Uncomment below line to print the response message also in case of no errors ##
 # log "Response: $BKPMSG"
