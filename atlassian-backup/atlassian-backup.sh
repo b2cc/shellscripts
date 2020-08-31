@@ -322,7 +322,7 @@ echo "
 
     --print-info                   print some details about the backup process before the backup starts
 
-    --progress-retries [NUMBER     number of times the script will check if the backup has been prepared. use this value
+    --progress-retries [NUMBER]    number of times the script will check if the backup has been prepared. use this value
                                    together with '--progress-sleep' to define maximum interval the script will wait for
                                    the backup to finish (retries * seconds). defaults to 300 retries.
 
@@ -332,7 +332,7 @@ echo "
 
     --timezone [TZ]                timezone for correct timestamping of the backup file. defaults to 'Europe/Berlin'
 
-  bitbucket:                       oauth credentials can be created in https://bitbucket.org/nextdigitalbanking/workspace/settings/api
+  bitbucket:                       oauth credentials can be created in https://bitbucket.org/<TENANT>/workspace/settings/api
 
     --oauth-key [KEY]              value of the oauth key set in bitbucket. must at least be able to read projects from bitbucket
     --oauth-secret [SECRET]        value of the oauth secret set in bitbucket.
@@ -430,7 +430,6 @@ done
 
 backup_error_file="/var/lock/${APP}_backup_faulty"
 backup_in_progress_file="/var/lock/${APP}_in_progress"
-BACKUP_FOLDER="/var/nfs/lun1/long-term-backups/atlassian/${APP}"
 INSTANCE="${tenant}.atlassian.net"
 TODAY=$(TZ=$TIMEZONE date +%d-%m-%Y_%H%M)
 trap "die '!! backup interrupted !! lock file created: **${backup_error_file}**, future backups disabled!'" INT SIGHUP SIGINT SIGTERM
