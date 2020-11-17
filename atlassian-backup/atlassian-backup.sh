@@ -307,12 +307,12 @@ echo "
 
   generic:
     -h | --help                    display help
-    -a | --app [APPNAME]           which cloud app to backup. possible APPNAMEs are:
+    -A | --app [APPNAME]           which cloud app to backup. possible APPNAMEs are:
                                      * bitbucket
                                      * confluence
                                      * jira
 
-    -A | --with-attachments        include attachments in the backup (only valid for confluence and jira)
+    -a | --with-attachments        include attachments in the backup (only valid for confluence and jira)
                                    caution: atlassian allows this only every two days, otherwise backups will fail
 
     -B | --backup-folder [FOLDER]  location on local filesystem where the backup should be stored
