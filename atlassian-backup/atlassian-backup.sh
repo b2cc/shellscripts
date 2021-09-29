@@ -21,9 +21,12 @@
 # script common variables
 bitbucket_oauth_url="https://bitbucket.org/site/oauth2"
 bitbucket_api_url="https://api.bitbucket.org/2.0"
-attachments="false"
 backup=""
 tenant=""
+EXPORT_WITH_ATTACHMENTS="false"
+EXPORT_ATTACHMENTS_SUFFIX="_without-attachements"
+EXPORT_FOR_CLOUD="false"
+EXPORT_TYPE_SUFFIX="_server"
 TEMPDIR=""
 LOGGER="$(command -v logger)"
 SCRIPT=$(basename $0)
@@ -69,6 +72,7 @@ log_generic() {
   logproc=$(echo $$)
   logmessage="$logdate ${HOST} ${scriptname}[${logproc}]: (${USER}) ${LOGLEVEL}: $1"
   echo "${logmessage}"
+  echo "${logmessage}" >> /var/log/atlassian-${APP}-backup.log
   ${LOGGER} "$1"
 }
 
@@ -132,7 +136,7 @@ print_backup_info() {
 log " * Backup info:"
 log "    * App: ${APP}"
 log "    * Tenant domain: ${INSTANCE}"
-log "    * Include attachments (only jira/confluence): ${attachments}"
+log "    * Include attachments (only jira/confluence): ${EXPORT_WITH_ATTACHMENTS}"
 log "    * Backup folder: ${BACKUP_FOLDER}"
 log "    * Progress check retries: ${progress_retries}"
 log "    * Wait between progress check retries: ${progress_sleep} seconds"
@@ -169,7 +173,7 @@ if ! [[ -z ${repositories} ]]; then
   log " * Starting bitbucket backup..."
   for repo in ${repositories[@]}; do
     log "   * cloning repository ${repo} to temporary directory..."
-    git clone --quiet https://x-token-auth:"${auth_token}"@bitbucket.org/${repo}.git ${TEMPDIR}/${repo} >/dev/null || die " * Error while cloning repository ${repo}, exiting."
+    git clone --quiet --mirror https://x-token-auth:"${auth_token}"@bitbucket.org/${repo}.git ${TEMPDIR}/${repo} >/dev/null || die " * Error while cloning repository ${repo}, exiting."
   done
 else
   die " * List of repositories to clone is empty! Exiting."
@@ -190,9 +194,9 @@ set -o pipefail
 log "* Starting ${APP} backup..."
 
 log " * Requesting start of ${APP} backup from atlassian cloud..."
-log "    * backup with attachments requested: ${attachments}"
+log "    * backup with attachments requested: ${EXPORT_WITH_ATTACHMENTS}"
 ## The $BKPMSG variable is used to save and print the response
-BKPMSG=$(curl -sSfL -u ${EMAIL}:${API_TOKEN} -H "X-Atlassian-Token: no-check" -H "X-Requested-With: XMLHttpRequest" -H "Content-Type: application/json"  -X POST "https://${INSTANCE}/wiki/rest/obm/1.0/runbackup" -d "{\"cbAttachments\":\"${attachments}\" }" || die " * Error during request to atlassian cloud to start confluence backup, exiting.")
+BKPMSG=$(curl -sSfL -u ${EMAIL}:${API_TOKEN} -H "X-Atlassian-Token: no-check" -H "X-Requested-With: XMLHttpRequest" -H "Content-Type: application/json"  -X POST "https://${INSTANCE}/wiki/rest/obm/1.0/runbackup" -d "{\"cbAttachments\":\"${EXPORT_WITH_ATTACHMENTS}\", \"exportToCloud\":\"${EXPORT_FOR_CLOUD}\"}" || die " * Error during request to atlassian cloud to start confluence backup, exiting.")
 
 ## Uncomment below line to print the response message also in case of no errors ##
 #log "Response message: $BKPMSG \n"
@@ -204,7 +208,7 @@ fi
 
 # Checks if the backup process completed for the number of times specified in progress_retries variable
 for (( c=1; c<=${progress_retries}; c++ )); do
-  log "    * waiting for atlassian cloud to finish backup..."
+  log "    * waiting for atlassian ${APP} cloud to finish backup..."
   PROGRESS_JSON=$(curl -sSfL -u ${EMAIL}:${API_TOKEN} https://${INSTANCE}/wiki/rest/obm/1.0/getprogress.json || die " * Error while requesting backup generation progress, exiting.")
   FILE_NAME=$(echo "$PROGRESS_JSON" | sed -n 's/.*"fileName"[ ]*:[ ]*"\([^"]*\).*/\1/p')
 
@@ -233,7 +237,7 @@ else
   ## PRINT THE FILE TO DOWNLOAD ##
   log " * Atlassian cloud finished the generation of the backup."
   log " * Now downloading backup file: https://${INSTANCE}/wiki/download/${FILE_NAME} to ${BACKUP_FOLDER}/CONFLUENCE-backup-${TODAY}.zip ..."
-  curl -sSfL -u ${EMAIL}:${API_TOKEN} "https://${INSTANCE}/wiki/download/${FILE_NAME}" -o "${BACKUP_FOLDER}/CONFLUENCE-backup-${TODAY}.zip" || die " * Error while downloading ${APP} backup from atlassian cloud, exiting."
+  curl -sSfL -u ${EMAIL}:${API_TOKEN} "https://${INSTANCE}/wiki/download/${FILE_NAME}" -o "${BACKUP_FOLDER}/CONFLUENCE-backup${EXPORT_ATTACHMENTS_SUFFIX}${EXPORT_TYPE_SUFFIX}-${TODAY}.zip" || die " * Error while downloading ${APP} backup from atlassian cloud, exiting."
 fi
 log " * ${APP} backup finished successfully after ${SECONDS} seconds."
 }
@@ -241,14 +245,13 @@ log " * ${APP} backup finished successfully after ${SECONDS} seconds."
 backup_jira(){
 set -o pipefail
 # required for cloud backups
-EXPORT_TO_CLOUD=true
 
 log "* Starting ${APP} backup..."
 log " * Requesting start of ${APP} backup from atlassian cloud..."
-log "    * backup with attachments requested: ${attachments}"
+log "    * backup with attachments requested: ${EXPORT_WITH_ATTACHMENTS}"
  
 ## The $BKPMSG variable is used to save and print the response
-BKPMSG=$(curl -sSLf -u ${EMAIL}:${API_TOKEN} -H "Accept: application/json" -H "Content-Type: application/json" --data-binary "{\"cbAttachments\":\"${attachments}\", \"exportToCloud\":\"${EXPORT_TO_CLOUD}\"}" -X POST https://${INSTANCE}/rest/backup/1/export/runbackup || die " * Error during request to atlassian cloud to start ${APP} backup, exiting.")
+BKPMSG=$(curl -sSLf -u ${EMAIL}:${API_TOKEN} -H "Accept: application/json" -H "Content-Type: application/json" --data-binary "{\"cbAttachments\":\"${EXPORT_WITH_ATTACHMENTS}\", \"exportToCloud\":\"${EXPORT_FOR_CLOUD}\"}" -X POST https://${INSTANCE}/rest/backup/1/export/runbackup || die " * Error during request to atlassian cloud to start ${APP} backup, exiting.")
  
 ## Uncomment below line to print the response message also in case of no errors ##
 # log "Response: $BKPMSG"
@@ -264,7 +267,8 @@ TASK_ID=$(echo "$BKPMSG" | sed -n 's/.*"taskId"[ ]*:[ ]*"\([^"]*\).*/\1/p')
  
 # Checks if the backup process completed for the number of times specified in progress_retries variable
 for (( c=1; c<=${progress_retries}; c++ )); do
-  log "    * waiting for atlassian cloud to finish backup..."
+  log "    * got atlassian ${APP} cloud task ID: ${TASK_ID}"
+  log "    * waiting for atlassian ${APP} cloud to finish backup..."
   PROGRESS_JSON=$(curl -sSLf -u ${EMAIL}:${API_TOKEN} -X GET https://${INSTANCE}/rest/backup/1/export/getProgress?taskId=${TASK_ID} || die " * Error while requesting backup generation progress, exiting.")
   FILE_NAME=$(echo "${PROGRESS_JSON}" | sed -n 's/.*"result"[ ]*:[ ]*"\([^"]*\).*/\1/p')
  
@@ -293,7 +297,7 @@ else
   ## PRINT THE FILE TO DOWNLOAD ##
   log " * Atlassian cloud finished the generation of the backup."
   log " * Now downloading backup file: https://${INSTANCE}/plugins/servlet/${FILE_NAME} to ${BACKUP_FOLDER}/JIRA-backup-${TODAY}.zip ..."
-  curl -sSLf -u ${EMAIL}:${API_TOKEN} -X GET "https://${INSTANCE}/plugins/servlet/${FILE_NAME}" -o "${BACKUP_FOLDER}/JIRA-backup-${TODAY}.zip" || " * Error while downloading ${APP} backup from atlassian cloud, exiting."
+  curl -sSLf -u ${EMAIL}:${API_TOKEN} -X GET "https://${INSTANCE}/plugins/servlet/${FILE_NAME}" -o "${BACKUP_FOLDER}/JIRA-backup${EXPORT_ATTACHMENTS_SUFFIX}${EXPORT_TYPE_SUFFIX}-${TODAY}.zip" || " * Error while downloading ${APP} backup from atlassian cloud, exiting."
 fi
 log " * ${APP} backup finished successfully after ${SECONDS} seconds."
 }
@@ -312,9 +316,6 @@ echo "
                                      * confluence
                                      * jira
 
-    -a | --with-attachments        include attachments in the backup (only valid for confluence and jira)
-                                   caution: atlassian allows this only every two days, otherwise backups will fail
-
     -B | --backup-folder [FOLDER]  location on local filesystem where the backup should be stored
 
     -t | --tenant [TENANT]         name of the cloud tenant to backup. e.g. if your domain is "https://mycompany.atlassian.net",
@@ -322,7 +323,7 @@ echo "
 
     --print-info                   print some details about the backup process before the backup starts
 
-    --progress-retries [NUMBER]    number of times the script will check if the backup has been prepared. use this value
+    --progress-retries [NUMBER     number of times the script will check if the backup has been prepared. use this value
                                    together with '--progress-sleep' to define maximum interval the script will wait for
                                    the backup to finish (retries * seconds). defaults to 300 retries.
 
@@ -332,7 +333,7 @@ echo "
 
     --timezone [TZ]                timezone for correct timestamping of the backup file. defaults to 'Europe/Berlin'
 
-  bitbucket:                       oauth credentials can be created in https://bitbucket.org/<TENANT>/workspace/settings/api
+  bitbucket:                       oauth credentials can be created in https://bitbucket.org/nextdigitalbanking/workspace/settings/api
 
     --oauth-key [KEY]              value of the oauth key set in bitbucket. must at least be able to read projects from bitbucket
     --oauth-secret [SECRET]        value of the oauth secret set in bitbucket.
@@ -343,13 +344,20 @@ echo "
 
     --api-token [TOKEN]            value of the API token
     --email-address [EMAIL]        corresponding email address of the account that created the API token
+
+    -a | --with-attachments        include attachments in the backup (only valid for confluence and jira)
+                                   caution: atlassian allows this only every two days, otherwise backups will fail
+                                   default: false
+
+    -c | --for-cloud               create a backup that can be imported into an atlassian cloud instance (only valid for jira)
+                                   default: false
 "
 exit 0
 }
 
 if [[ -z $1 ]]; then print_help; fi
 OPTS=haA:B:It:
-LONGOPTS=help,app:,api-token:,backup-folder:,email-address:,oauth-key:,oauth-secret:,print-info,progress-retries:,progress-sleep:,retention:,tenant:,timezone:,with-attachments
+LONGOPTS=help,app:,api-token:,backup-folder:,for-cloud,email-address:,oauth-key:,oauth-secret:,print-info,progress-retries:,progress-sleep:,retention:,tenant:,timezone:,with-attachments
 ! PARSED=$(getopt --options=${OPTS} \
                   --longoptions=${LONGOPTS} \
                   --name "${0}" \
@@ -375,10 +383,16 @@ while [[ ( ${discard_opts_after_doubledash} -eq 1 ) || ( $# -gt 0 ) ]]; do
       esac
       ;;
     -a|--with-attachments)
-      attachments="true"
+      EXPORT_WITH_ATTACHMENTS="true"
+      EXPORT_ATTACHMENTS_SUFFIX="_with-attachements"
       ;;
     --api-token)
       API_TOKEN="$2"
+      shift
+      ;;
+    -c|--for-cloud)
+      EXPORT_FOR_CLOUD="true"
+      EXPORT_TYPE_SUFFIX="_cloud"
       shift
       ;;
     -B|--backup-folder)
@@ -430,6 +444,7 @@ done
 
 backup_error_file="/var/lock/${APP}_backup_faulty"
 backup_in_progress_file="/var/lock/${APP}_in_progress"
+BACKUP_FOLDER="/var/nfs/lun1/long-term-backups/atlassian/${APP}"
 INSTANCE="${tenant}.atlassian.net"
 TODAY=$(TZ=$TIMEZONE date +%d-%m-%Y_%H%M)
 trap "die '!! backup interrupted !! lock file created: **${backup_error_file}**, future backups disabled!'" INT SIGHUP SIGINT SIGTERM
