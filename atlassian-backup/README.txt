@@ -31,5 +31,5 @@
     -a | --with-attachments        include attachments in the backup (only valid for confluence and jira)
                                    caution: atlassian allows this only every two days, otherwise backups will fail
                                    default: false
-    -c | --for-cloud               create a backup that can be imported into an atlassian cloud instance (only valid for jira)
+    -c | --for-cloud               create a backup that can be imported into an atlassian cloud instance
                                    default: false
