@@ -1,0 +1,318 @@
+#!/bin/bash
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation in version 2 of the License (GPLv2).
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# v1.1 Copyright (C) 2012 Lukasz Gogolin (lukasz.gogolin@gmail.com)
+# v1.2 2014 Modified by Aaron Roydhouse (aaron@roydhouse.com)
+# v1.3 2015 Modified by Aaron Roydhouse (aaron@roydhouse.com)
+# v1.4 2018 Modified by @DavidGoodwin, @eacmen, @whereisaaron
+# v2.0 2018 Modified by @b2cc, b2c@dest-unreachable.net
+# - initially derived from: https://github.com/whereisaaron/linux-check-mem-nagios-plugin/
+# - refactored check to be more in line with output from tools like procps/htop
+#   and correctly calculate memory usage regarding to SReclaim/Shmem/Cache
+# - added bash4 getopts parser
+# - added option to report and alert on swap usage
+# - added options to disable alert on mem/swap usage (always report 'OK', just show calculated values)
+# - added warn/crit/max values in perfdata
+# - added various sanity checks
+# - see discussions / documentation:
+#   - https://stackoverflow.com/questions/41224738/how-to-calculate-system-memory-usage-from-proc-meminfo-like-htop
+#   - https://github.com/hishamhm/htop/issues/242
+#   - https://github.com/torvalds/linux/blob/master/Documentation/filesystems/proc.txt#L901
+#   - https://gitlab.com/procps-ng/procps/commit/05d751c4f076a2f0118b914c5e51cfbb4762ad8e
+
+BINARIES=(awk cat sort)
+LOGGER="$(which logger)"
+SCRIPTNAME="$(basename $0)"
+OLDIFS="$IFS"
+debug="false"
+memalert=""
+memcrit=""
+memwarn=""
+mem_warn_thres=""
+mem_crit_thres=""
+memstate=""
+swapalert=""
+swapcrit=""
+swapwarn=""
+swapstate=""
+swap_warn_thres=""
+swap_crit_thres=""
+multiplier=""
+unit=""
+verbose="false"
+vzinfo=""
+
+log_generic() {
+  logdate=$(date "+%h %d %H:%M:%S")
+  logproc=$(echo $$)
+  logmessage="$logdate ${HOST} ${scriptname}[${logproc}]: (${USER}) ${LOGLEVEL}: $1"
+  echo "${logmessage}"
+  ${LOGGER} "$1"
+}
+
+log() {
+  LOGLEVEL="INFO"
+  log_generic "$@"
+}
+
+log_debug() {
+if [[ ${debug} == enabled ]]; then
+  LOGLEVEL="DEBUG"
+  log_generic "$@"
+fi
+}
+
+die() {
+  LOGLEVEL="ERROR"
+  log_generic "$@"
+  exit 1
+}
+
+for binary in "${BINARIES[@]}"; do
+  [[ -x $(which ${binary} 2>/dev/null) ]] || die "${binary} binary not found, exiting."
+done
+
+trap "die 'Program interrupted! Exiting...'" SIGHUP SIGINT SIGQUIT SIGABRT
+
+! getopt --test > /dev/null
+if [[ ${PIPESTATUS[0]} -ne 4 ]]; then
+  die "installed version of getopt does not support required features. install/update util-linux package."
+fi
+
+[[ -r /proc/meminfo ]] || die "can't read data from /proc/meminfo, exiting."
+[[ -d /proc/vz ]] && vzinfo=" (OpenVZ detected, values may be unreliable)"
+
+print_help() {
+echo "
+  ${SCRIPTNAME}
+    -h | --help             display help
+    -u | --unit             either B, K, M or G. default: M
+    -c | --mem-critical     memory critical threshold in percent. default: 90
+    -w | --mem-warning      memory warning threshold in percent. default: 80
+    -C | --swap-critical    swap critical threshold in percent. default: 50
+    -W | --swap-warning     swap warning threshold in percent. default: 25
+    -M | --no-mem-alert     mem usage above threshold does not trigger alert. default: false
+    -S | --no-swap-alert    swap usage above threshold does not trigger alert. default: false
+    -v | --verbose          display check states and calculated values. output can NOT be parsed by nagios,
+                            for debugging only. default: false
+"
+exit 0
+}
+
+read_memdata() {
+egrep '^(Mem(Total|Free)|Buffers|Cached|Shmem|SReclaimable|Swap(Free|Total)):' /proc/meminfo \
+  | tr -d ':' \
+  | awk '{CONVFMT="%.0f"; print "["$1"]="$2*1024}' || die "error whlie reading /proc/meminfo, exiting."
+}
+
+calculate_mem_usage() {
+stty -echo 2> /dev/null
+while IFS= read -r -s; do
+  declare -A memmap+="( $REPLY )"
+done < <(read_memdata)
+IFS="${OLDIFS}"
+stty echo 2> /dev/null
+
+for key in MemTotal MemFree Buffers Cached SwapTotal SwapFree Shmem SReclaimable; do
+  [[ ${memmap[${key}]} =~ ^[0-9][0-9]?+ ]] || die "could not evaluate memory key ${key} (value: ${memmap[${key}]}), exiting."
+done
+
+MemTotal="${memmap[MemTotal]}"
+SwapTotal="${memmap[SwapTotal]}"
+calc_mem_total_used=$(( ${memmap[MemTotal]} - ${memmap[MemFree]} ))
+calc_mem_buffers=${memmap[Buffers]}
+calc_mem_cached=$(( ${memmap[Cached]} + ${memmap[SReclaimable]} - ${memmap[Shmem]} ))
+calc_mem_no_cache_buffer=$(( ${calc_mem_total_used} - ( ${calc_mem_buffers} + ${calc_mem_cached} ) ))
+calc_mem_swap_used=$(( ${memmap[SwapTotal]} - ${memmap[SwapFree]} ))
+
+total=$(( ${MemTotal} / (${multiplier}) ))
+totalused=$(( ${calc_mem_total_used} / (${multiplier}) ))
+effectiveused=$(( ${calc_mem_no_cache_buffer} / (${multiplier}) ))
+cached=$(( ${calc_mem_cached} / (${multiplier}) ))
+swapped=$(( ${calc_mem_swap_used} / (${multiplier}) ))
+
+totalusedprcnt=$(awk -v total=${MemTotal} -v used=${calc_mem_total_used} 'BEGIN { printf "%.2f\n", 100 * used / total }')
+effectiveusedprcnt=$(awk -v total=${MemTotal} -v effective=${calc_mem_no_cache_buffer} 'BEGIN { printf "%.2f\n", 100 * effective / total }')
+cachedprcnt=$(awk -v total=${MemTotal} -v cached=${calc_mem_cached} 'BEGIN { printf "%.2f\n", 100 * cached / total }')
+if [[ ${SwapTotal} -gt 0 ]]; then
+  swappedprcnt=$(awk -v swaptotal=${SwapTotal} -v swapped=${calc_mem_swap_used} 'BEGIN { printf "%.2f\n", 100 * swapped / swaptotal }')
+else
+  swapalert="false"
+  swappedprcnt="0"
+fi
+
+mem_warn_thres=$(( (${MemTotal} * ${memwarn}) / 100 ))
+mem_crit_thres=$(( (${MemTotal} * ${memcrit}) / 100 ))
+swap_warn_thres=$(( (${SwapTotal} * ${swapwarn}) / 100 ))
+swap_crit_thres=$(( (${SwapTotal} * ${swapcrit}) / 100 ))
+
+if $memalert; then
+  [[ ${calc_mem_no_cache_buffer} -lt ${mem_warn_thres} ]] && memstate="0" 
+  [[ ${calc_mem_no_cache_buffer} -ge ${mem_warn_thres} ]] && memstate="1"
+  [[ ${calc_mem_no_cache_buffer} -ge ${mem_crit_thres} ]] && memstate="2"
+else
+  memstate="0"
+fi
+
+if $swapalert; then
+  [[ ${calc_mem_swap_used} -lt ${swap_warn_thres} ]] && swapstate="0"
+  [[ ${calc_mem_swap_used} -ge ${swap_warn_thres} ]] && swapstate="1"
+  [[ ${calc_mem_swap_used} -ge ${swap_crit_thres} ]] && swapstate="2"
+else
+  swapstate="0"
+fi
+
+resultset=(${memstate} ${swapstate})
+IFS=$'\n'
+result=$(echo "${resultset[*]}" | sort -nr | head -n1)
+IFS="${OLDIFS}"
+
+case ${result} in
+  0) CHECKSTATE="OK" rc="${result}"
+  ;; 
+  1) CHECKSTATE="WARNING" rc="${result}"
+  ;;
+  2) CHECKSTATE="CRITICAL" rc="${result}"
+  ;;
+  *) CHECKSTATE="UNKNOWN: could not compute memory and/or swap usage." rc="3"
+  ;;
+esac
+
+MESSAGE="Memory usage ${CHECKSTATE}${vzinfo}: ${totalused}${unitname} (${totalusedprcnt}%) of ${total}${unitname}, Effective memory usage: ${effectiveused}${unitname} (${effectiveusedprcnt}%) Swap usage: ${swapped}${unitname} (${swappedprcnt}%) | TotalMem=${MemTotal} TotalMemUsed=${calc_mem_total_used}B;${MemTotal};${MemTotal};0;${MemTotal} EffectiveMemUsed=${calc_mem_no_cache_buffer}B;${mem_warn_thres};${mem_crit_thres};0;${MemTotal} SwapUsed=${calc_mem_swap_used}B;${swap_warn_thres};${swap_crit_thres};0;${SwapTotal}"
+}
+
+notify() {
+echo "${MESSAGE}"
+exit ${rc}
+}
+
+print_verbose_mem_usage() {
+calculate_mem_usage
+echo " debug:
+ * Thresh., Unit, Multipl.:
+ --------------------------
+ mem:              warn=${memwarn} crit=${memcrit} thresh.warn=${mem_warn_thres} thresh.crit=${mem_crit_thres}
+ swap:             warn=${swapwarn} crit=${swapcrit} thresh.warn=${swap_warn_thres} thresh.crit=${swap_crit_thres}
+ multipl.:         ${multiplier}
+ unit:             ${unitname}
+ memstate:         ${memstate}
+ swapstate:        ${swapstate}
+ memalert:         ${memalert}
+ swapalert:        ${swapalert}
+ result:           ${result}
+ * Calculated memory usage:
+ --------------------------
+ Mem Total:        $(( ${MemTotal} / (${multiplier}) )) ${unitname}
+ Swap Total:       $(( ${SwapTotal} / (${multiplier}) )) ${unitname}
+ Total used:       ${totalused} (${totalusedprcnt}%)
+ Effective used:   ${effectiveused} (${effectiveusedprcnt}%)
+ Cached:           ${cached} (${cachedprcnt}%)
+ Swap used:        ${swapped} (${swappedprcnt}%)
+ * Check Output:
+ ---------------
+ Message:          ${MESSAGE}
+"
+exit 0
+}
+
+OPTS=hc:w:u:vC:W:MS
+LONGOPTS=help,mem-critical:,mem-warning:,unit:,verbose,swap-critical:,swap-warning:,no-mem-alert,no-swap-alert
+! PARSED=$(getopt --options=$OPTS \
+                  --longoptions=$LONGOPTS \
+                  --name "$0" \
+                  -- "$@")
+if [[ ${PIPESTATUS[0]} -ne 0 ]]; then
+  die "getopt parser reported an error parsing arguments, aborting."
+fi
+
+eval set -- "$PARSED"
+while [[ ( ${discard_opts_after_doubledash} -eq 1 ) || ( $# -gt 0 ) ]]; do
+  case "$1" in
+    -h|--help)
+      print_help
+      ;;
+    -c|--mem-critical)
+      memcrit="${2}"
+      shift
+      ;;
+    -v|--verbose)
+      verbose="true"
+      ;;
+    -w|--mem-warning)
+      memwarn="${2}"
+      shift
+      ;;
+    -u|--unit)
+      unit="${2}"
+      shift
+      case ${unit} in
+        B) multiplier="1" unitname="B" ;;
+        K) multiplier="1024" unitname="KiB" ;;
+        M) multiplier="1024 * 1024" unitname="MiB" ;;
+        G) multiplier="1024 * 1024 * 1024" unitname="GiB" ;;
+        *) die "unknown unit specified, exiting." ;;
+      esac
+      ;;
+    -C|--swap-critical)
+      swapcrit="${2}"
+      shift
+      ;;
+    -W|--swap-warning)
+      swapwarn="${2}"
+      shift
+      ;;
+    -M|--no-mem-alert)
+      memalert="false"
+      ;;
+    -S|--no-swap-alert)
+      swapalert="false"
+      ;;
+  esac
+  memalert="${memalert:=true}"
+  memcrit="${memcrit:=90}"
+  memwarn="${memwarn:=80}"
+  swapalert="${memalert:=true}"
+  swapcrit="${swapcrit:=50}"
+  swapwarn="${swapwarn:=25}"
+  multiplier="${multiplier:=1024 * 1024}" unitname="${unitname:=MiB}"
+  shift
+done
+
+check_threshold() {
+for threshold in ${memwarn} ${memcrit} ${swapwarn} ${swapcrit} ; do
+  if ! [[ ${threshold} =~ ^[1-9]?[0-9]$ ]] ; then
+    log_debug "threshold: ${SIZE}"
+    die "threshold is not a number in range 1-99, exiting."
+  fi
+done
+
+if [[ $crit -lt 0 ]] || \
+  [[ $crit -gt 100 ]] || \
+  [[ $warn -lt 0 ]] || \
+  [[ $warn -gt 100 ]] || \
+  [[ $memwarn -gt $memcrit ]] ||
+  [[ $swapwarn -gt $swapcrit ]]; then
+  die "wrong warn and/or crit threshold specified, exiting."
+fi
+
+if [[ $memwarn -eq $memcrit ]] || [[ $swapwarn -eq $swapcrit ]] ; then
+  log "warning: threshold for warning and critical status are the same!"
+fi
+}
+
+[[ ${verbose} == true ]] && print_verbose_mem_usage
+
+check_threshold
+calculate_mem_usage
+notify
