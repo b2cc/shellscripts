@@ -24,7 +24,7 @@ bitbucket_api_url="https://api.bitbucket.org/2.0"
 backup=""
 tenant=""
 EXPORT_WITH_ATTACHMENTS="false"
-EXPORT_ATTACHMENTS_SUFFIX="_without-attachements"
+EXPORT_ATTACHMENTS_SUFFIX="_without-attachments"
 EXPORT_FOR_CLOUD="false"
 EXPORT_TYPE_SUFFIX="_server"
 TEMPDIR=""
@@ -384,7 +384,7 @@ while [[ ( ${discard_opts_after_doubledash} -eq 1 ) || ( $# -gt 0 ) ]]; do
       ;;
     -a|--with-attachments)
       EXPORT_WITH_ATTACHMENTS="true"
-      EXPORT_ATTACHMENTS_SUFFIX="_with-attachements"
+      EXPORT_ATTACHMENTS_SUFFIX="_with-attachments"
       ;;
     --api-token)
       API_TOKEN="$2"
