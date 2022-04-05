@@ -70,7 +70,7 @@ create_tempdir() {
 log_generic() {
   logdate=$(date "+%h %d %H:%M:%S")
   logproc=$(echo $$)
-  logmessage="$logdate ${HOST} ${scriptname}[${logproc}]: (${USER}) ${LOGLEVEL}: $1"
+  logmessage="$logdate ${HOST} ${SCRIPT}[${logproc}]: (${USER}) ${LOGLEVEL}: $1"
   echo "${logmessage}"
   echo "${logmessage}" >> /var/log/atlassian-${APP}-backup.log
   ${LOGGER} "$1"
@@ -122,7 +122,7 @@ check_vars() {
       if [[ -z ${EMAIL} ]]; then die " * Error: variable \$EMAIL is not defined, exiting"; fi
       if [[ -z ${progress_retries} ]]; then progress_retries=300; fi
       if [[ -z ${progress_sleep} ]]; then progress_sleep=30; fi
-      if [[ -z ${timezone} ]]; then timezone="Europe/Vienna"; fi
+      if [[ -z ${timezone} ]]; then timezone="Europe/Berlin"; fi
     ;;
   esac
 }
