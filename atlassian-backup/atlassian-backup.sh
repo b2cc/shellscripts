@@ -444,7 +444,7 @@ done
 
 backup_error_file="/var/lock/${APP}_backup_faulty"
 backup_in_progress_file="/var/lock/${APP}_in_progress"
-BACKUP_FOLDER="/var/nfs/lun1/long-term-backups/atlassian/${APP}"
+BACKUP_FOLDER="${BACKUP_FOLDER}/${APP}"
 INSTANCE="${tenant}.atlassian.net"
 TODAY=$(TZ=$TIMEZONE date +%d-%m-%Y_%H%M)
 trap "die '!! backup interrupted !! lock file created: **${backup_error_file}**, future backups disabled!'" INT SIGHUP SIGINT SIGTERM
